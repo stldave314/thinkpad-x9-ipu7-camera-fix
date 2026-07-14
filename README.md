@@ -39,7 +39,7 @@ sudo apt install dkms build-essential patch linux-headers-$(uname -r) v4l-utils
 own dependencies, so you normally don't need to do this by hand:
 
 ```
-python3-numpy v4l-utils gstreamer1.0-tools \
+python3-numpy v4l-utils acl gstreamer1.0-tools \
 gstreamer1.0-plugins-base gstreamer1.0-plugins-good imagemagick
 ```
 
@@ -121,8 +121,11 @@ rebuilding the driver or juggling packages because it’s robust and update-proo
 ```
 
 `install-softisp.sh` installs the dependencies, drops `ipu7-softisp.py` at
-`/usr/local/bin`, installs+starts `ipu7-softisp.service`, and **masks the broken
-`v4l2-relayd`** so it stops fighting for `/dev/video0`.
+`/usr/local/bin`, installs+starts `ipu7-softisp.service`, **masks the broken
+`v4l2-relayd`** so it stops fighting for `/dev/video0`, and installs a udev rule
+(`99-ipu7-hide-raw-nodes.rules`) that makes the 32 raw ISYS capture nodes
+root-only — so camera apps list **only** “Intel MIPI Camera” instead of 33
+devices. The daemon runs as root and still uses the raw node.
 
 ### About the software ISP daemon (`ipu7-softisp.py`)
 
@@ -175,6 +178,8 @@ early diagnosis this key looked like it was disabling the camera; it wasn’t.)
   kernel, as a fallback if DKMS can’t rebuild (kernel-version specific).
 - `install-softisp.sh` + `ipu7-softisp.py` + `ipu7-softisp.service` — Fault 2
   software-ISP bypass.
+- `99-ipu7-hide-raw-nodes.rules` — udev rule that hides the raw ISYS capture
+  nodes so apps list only the virtual camera.
 
 ## License
 

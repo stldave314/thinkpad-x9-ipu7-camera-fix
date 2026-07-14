@@ -1,0 +1,12 @@
+# Hide the raw Intel IPU7 ISYS capture nodes from user-space camera apps.
+#
+# The IPU7 isys driver exposes 32 raw-Bayer capture nodes (/dev/videoN, card
+# "Intel IPU7 ISYS Capture N"). They are useless to normal apps (raw SRGGB10,
+# needs a media-ctl pipeline) but every camera picker lists them, forcing the
+# user to hunt for the real device.
+#
+# Make them root-only and drop the logind uaccess ACL so apps (which run as the
+# user) can't open them and therefore don't list them. The ipu7-softisp daemon
+# runs as root and still uses them; the "Intel MIPI Camera" v4l2loopback node
+# (/dev/video0) is not matched here and stays user-accessible.
+SUBSYSTEM=="video4linux", ATTR{name}=="Intel IPU7 ISYS Capture *", TAG-="uaccess", OWNER="root", GROUP="root", MODE="0600"

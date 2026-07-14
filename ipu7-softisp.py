@@ -249,8 +249,12 @@ def start_output(loop, W, H, fps=30):
             "width=%d height=%d framerate=%d/1 ! videoscale ! "
             "video/x-raw,width=%d,height=%d ! videoconvert ! "
             "v4l2sink device=%s sync=false" % (W, H, fps, PUB_W, PUB_H, loop))
+    # NOTE: buffered stdin (no bufsize=0). A raw/unbuffered write of a ~1 MB
+    # frame to a 64 KB pipe does a *partial* write and returns early; a
+    # BufferedWriter + flush() guarantees the whole frame reaches GStreamer,
+    # otherwise frames desync and the output rolls/tears.
     return subprocess.Popen(["gst-launch-1.0", "-q"] + pipe.split(),
-                            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+                            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
 
 def black_frame(W, H):
@@ -337,12 +341,13 @@ def run():
     def push(buf):
         nonlocal oproc
         try:
-            oproc.stdin.write(buf)
+            oproc.stdin.write(buf)          # BufferedWriter: consumes whole frame
+            oproc.stdin.flush()             # force the full frame through the pipe
         except (BrokenPipeError, AttributeError, ValueError):
             log("output pipe broke; restarting producer")
             oproc = start_output(loop, OUT_W, OUT_H)
             try:
-                oproc.stdin.write(buf)
+                oproc.stdin.write(buf); oproc.stdin.flush()
             except Exception:
                 pass
 

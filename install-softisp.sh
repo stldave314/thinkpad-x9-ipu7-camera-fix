@@ -17,6 +17,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="${1:-install}"
 DAEMON=/usr/local/bin/ipu7-softisp.py
 UNIT=/etc/systemd/system/ipu7-softisp.service
+RULE=/etc/udev/rules.d/99-ipu7-hide-raw-nodes.rules
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 say(){ printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -32,6 +33,22 @@ find_loopback(){
     if grep -qxF "Intel MIPI Camera" "$d/name"; then echo "/dev/$(basename "$d")"; return; fi
   done
   echo /dev/video0
+}
+
+apply_udev(){
+  # hide the raw IPU7 ISYS nodes from apps so only "Intel MIPI Camera" is listed
+  say "Hiding raw IPU7 ISYS nodes from camera apps"
+  [ -f "$HERE/99-ipu7-hide-raw-nodes.rules" ] || { warn "rules file missing; skipping"; return; }
+  install -m0644 "$HERE/99-ipu7-hide-raw-nodes.rules" "$RULE"
+  udevadm control --reload
+  udevadm trigger --subsystem-match=video4linux --action=add 2>/dev/null || true
+  # drop any pre-existing logind uaccess ACL on the raw nodes for this session
+  for d in /sys/class/video4linux/video*; do
+    case "$(cat "$d/name" 2>/dev/null || true)" in
+      "Intel IPU7 ISYS Capture "*) setfacl -b "/dev/$(basename "$d")" 2>/dev/null || true ;;
+    esac
+  done
+  ok "raw nodes set root-only; apps should now list only 'Intel MIPI Camera'"
 }
 
 verify(){
@@ -66,6 +83,11 @@ case "$MODE" in
   systemctl disable --now ipu7-softisp.service 2>/dev/null || true
   rm -f "$UNIT" "$DAEMON" /etc/modules-load.d/ipu7-softisp.conf
   systemctl daemon-reload
+  if [ -f "$RULE" ]; then
+    rm -f "$RULE"; udevadm control --reload
+    udevadm trigger --subsystem-match=video4linux --action=add 2>/dev/null || true
+    ok "removed udev rule (raw nodes visible again)"
+  fi
   say "Restoring the original Intel relay (note: it produces the green screen)"
   systemctl unmask v4l2-relayd.service 'v4l2-relayd@default.service' 2>/dev/null || true
   systemctl enable --now v4l2-relayd.service 2>/dev/null || true
@@ -85,6 +107,7 @@ case "$MODE" in
   sleep 3
   systemctl is-active --quiet ipu7-softisp.service && ok "service restarted" \
     || { fail "service failed"; journalctl -u ipu7-softisp -n 25 --no-pager | sed 's/^/     /'; exit 1; }
+  apply_udev
   verify || true
   ;;
 install)
@@ -94,7 +117,7 @@ install)
   say "Installing dependencies (numpy + gstreamer/v4l tools)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq || warn "apt update failed (continuing; deps may already be present)"
-  apt-get install -y --no-install-recommends python3-numpy v4l-utils \
+  apt-get install -y --no-install-recommends python3-numpy v4l-utils acl \
       gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good imagemagick \
       || { fail "dependency install failed — check network/apt"; exit 1; }
   python3 -c 'import numpy' 2>/dev/null && ok "python3 + numpy ready" || { fail "numpy not importable"; exit 1; }
@@ -118,6 +141,7 @@ install)
   systemctl is-active --quiet ipu7-softisp.service && ok "service active" \
     || { fail "service failed to start"; journalctl -u ipu7-softisp -n 30 --no-pager | sed 's/^/     /'; exit 1; }
 
+  apply_udev
   verify || true
   say "DONE"
   echo "   The webcam appears to apps as 'Intel MIPI Camera' on $(find_loopback)."
