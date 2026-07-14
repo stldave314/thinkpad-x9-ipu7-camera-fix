@@ -1,0 +1,79 @@
+--- a/Makefile
++++ b/Makefile
+@@ -4,8 +4,10 @@
+ PSYS_DIR := drivers/media/pci/intel/ipu7/psys
+ I2C_DIR  := drivers/media/i2c
+ BRIDGE_DIR := drivers/media/pci/intel
++ACPI_DIR := drivers/media/platform/intel
+ 
+ ccflags-y += -I$(src)/include
++ccflags-y += -DCONFIG_INTEL_IPU_ACPI=1
+ ccflags-y += -I$(src)/$(IPU7_DIR)
+ ccflags-y += -I$(src)/$(IPU7_DIR)/abi
+ ccflags-y += -I$(src)/$(PSYS_DIR)
+@@ -37,3 +39,7 @@
+ obj-m += $(I2C_DIR)/imx471.o
+ 
+ obj-m += $(BRIDGE_DIR)/ipu-bridge.o
++
++obj-m += $(ACPI_DIR)/ipu-acpi-common.o
++obj-m += $(ACPI_DIR)/ipu-acpi-pdata.o
++obj-m += $(ACPI_DIR)/ipu-acpi.o
+--- a/dkms.conf
++++ b/dkms.conf
+@@ -18,3 +18,15 @@
+ BUILT_MODULE_NAME[4]="ipu-bridge"
+ BUILT_MODULE_LOCATION[4]="drivers/media/pci/intel/"
+ DEST_MODULE_LOCATION[4]="/updates"
++
++BUILT_MODULE_NAME[5]="ipu-acpi-common"
++BUILT_MODULE_LOCATION[5]="drivers/media/platform/intel/"
++DEST_MODULE_LOCATION[5]="/updates"
++
++BUILT_MODULE_NAME[6]="ipu-acpi-pdata"
++BUILT_MODULE_LOCATION[6]="drivers/media/platform/intel/"
++DEST_MODULE_LOCATION[6]="/updates"
++
++BUILT_MODULE_NAME[7]="ipu-acpi"
++BUILT_MODULE_LOCATION[7]="drivers/media/platform/intel/"
++DEST_MODULE_LOCATION[7]="/updates"
+--- a/include/media/ipu-acpi-pdata.h
++++ b/include/media/ipu-acpi-pdata.h
+@@ -16,6 +16,25 @@
+ #define PHY_MODE_DPHY  0
+ #define PHY_MODE_CPHY  1
+ 
++/*
++ * The LT6911 HDMI-capture sensor headers are not shipped in this source
++ * package, but the in-kernel CONFIG_VIDEO_LT6911UXE enables code that
++ * references these macros. The values only matter if an LT6911 device
++ * is actually present in ACPI (never the case on IMX471 laptops).
++ */
++#ifndef LT6911UXC_NAME
++#define LT6911UXC_NAME "lt6911uxc"
++#endif
++#ifndef LT6911UXE_NAME
++#define LT6911UXE_NAME "lt6911uxe"
++#endif
++#ifndef LT6911UXC_I2C_ADDRESS
++#define LT6911UXC_I2C_ADDRESS 0x2b
++#endif
++#ifndef LT6911UXE_I2C_ADDRESS
++#define LT6911UXE_I2C_ADDRESS 0x2b
++#endif
++
+ int get_sensor_pdata(struct device *dev,
+ 			struct ipu_camera_module_data *data,
+ 			void *priv, size_t size,
+--- a/drivers/media/platform/intel/ipu-acpi-pdata.c
++++ b/drivers/media/platform/intel/ipu-acpi-pdata.c
+@@ -847,7 +847,8 @@
+ 	if (!dummy)
+ 		return -ENOMEM;
+ 
+-	ret = set_csi2(&dummy, cam_data->lanes, cam_data->pprval);
++	ret = set_csi2(&dummy, cam_data->lanes, cam_data->pprval,
++		       cam_data->bus_type);
+ 	if (ret) {
+ 		kfree(dummy);
+ 		return ret;

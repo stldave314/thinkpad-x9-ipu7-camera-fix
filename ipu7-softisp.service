@@ -1,0 +1,18 @@
+[Unit]
+Description=IPU7/IMX471 software ISP -> virtual camera (/dev/video0)
+Documentation=file:/home/dave/ipu7-fix/README.md
+After=modprobe@v4l2loopback.service systemd-udev-settle.service
+Wants=modprobe@v4l2loopback.service
+ConditionPathExists=/dev/media0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/ipu7-softisp.py
+Restart=always
+RestartSec=2
+# modest niceness so the debayer never starves the desktop
+Nice=-5
+IOSchedulingClass=best-effort
+
+[Install]
+WantedBy=multi-user.target
