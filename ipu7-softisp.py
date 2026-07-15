@@ -237,9 +237,19 @@ def start_capture(cap):
     subprocess.run(["v4l2-ctl", "-d", cap,
                     "--set-fmt-video=width=%d,height=%d,pixelformat=RG10" % (SENSOR_W, SENSOR_H)],
                    capture_output=True)
-    return subprocess.Popen(
+    # Read the frame geometry from the *actual* negotiated format, AFTER setting
+    # RG10 — never once at daemon startup. At cold boot the node sits at the
+    # driver's default format until we set it here; computing fsz/stride from
+    # that default gives a wrong frame size, so every read is misaligned and the
+    # output garbles/rolls until the service is restarted (which is why --update
+    # "fixed" it: the format was left sticky by the prior run). Owning it here
+    # makes the size match the live stream on every capture, cold boot included.
+    bpl, fsz = frame_bytes(cap)
+    stride_px = bpl // 2
+    proc = subprocess.Popen(
         ["v4l2-ctl", "-d", cap, "--stream-mmap=6", "--stream-count=0", "--stream-to=-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+    return proc, fsz, stride_px
 
 PUB_W, PUB_H = 1280, 720                   # resolution published to apps
 
@@ -307,8 +317,7 @@ def run():
     log("sensor=%s csi2=%s capture=%s loopback=%s" % (g["sensor_sd"], g["csi2"], cap, loop))
     setup_pipeline(g)
     sensor = Sensor(g["sensor_sd"])
-    bpl, fsz = frame_bytes(cap)
-    stride_px = bpl // 2
+    fsz = stride_px = None                        # set per-capture in start_capture()
 
     OUT_W, OUT_H = SENSOR_W // 2, SENSOR_H // 2   # 964x544 native ISP output
     black = black_frame(OUT_W, OUT_H)
@@ -365,7 +374,7 @@ def run():
                 if cproc is None and now >= retry_after:   # consumer present -> capture
                     log("consumer opened camera; capturing")
                     sensor.orient()                        # re-assert after power cycles
-                    cproc = start_capture(cap); awb = None; frames_seen = 0
+                    cproc, fsz, stride_px = start_capture(cap); awb = None; frames_seen = 0
             elif cproc is not None:               # grace period before stopping
                 if idle_since is None:
                     idle_since = now
@@ -401,8 +410,7 @@ def selftest(outpng, frames=12):
     g = discover(); cap = g["cap_node"]
     setup_pipeline(g)
     sensor = Sensor(g["sensor_sd"])
-    bpl, fsz = frame_bytes(cap); stride_px = bpl // 2
-    cproc = start_capture(cap)
+    cproc, fsz, stride_px = start_capture(cap)
     awb = None; rgb = None; mean_frac = 0
     for i in range(frames):
         raw = read_exact(cproc.stdout, fsz)
